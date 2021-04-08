@@ -1,3 +1,4 @@
+import re
 from typing import List
 import TexSoup
 
@@ -8,6 +9,17 @@ IGNORED_NODES = {
     'midrule',
     'bottomrule',
     'endhead'
+}
+TEXT_NODES = {
+    'underline',
+    'textit',
+    'textbf',
+    'textsc',
+    'texttt',
+    'it',
+    'bf',
+    'sc',
+    'tt'
 }
 
 
@@ -60,15 +72,13 @@ class TOC:
 class Tex2HTMLConverter:
     '''
     A stateful tex2html converter. It is initialised with a tex-formatted
-    string, which is passed to the TexSoup parser. A sequence of Tex
-    elements is then converted to a sequence of malformed HTML-formatted nodes.
-    Nodes are malformed because TexSoup does not handle paragraphs. Pieces of
-    text including double newlines are returned as a single text element, and
-    we have to add <p> and </p> tags based on internal state. HTML should become
-    well-formed when all the elements are concatenated together.
+    string. The string is split into blocks separated by 2+ whitespaces,
+    and the blocks are then processed one by one. Blocks not starting with
+    Tex commands are treated as paragraphs of text.
     '''
 
     def __init__(self, tex_string: str) -> None:
+        # Bookkeeping
         self.TOC = TOC()
         self.section_counter = 1
         self.subsection_counter = 1
@@ -78,12 +88,14 @@ class Tex2HTMLConverter:
         self.figure_counter = 1
         self.table_counter = 1
 
-        # Cases of more complex context-dependent generation
-        self.inside_paragraph = False
-        self.tex_tree = TexSoup.TexSoup(tex_string)
+        # We need this step to cleanly take care of paragraphs
+        # and other elements, such as \ex. blocks, that TexSoup
+        # does not handle correctly.
+        self.blocks = re.split(r'[\n\r]{2,}', preprocess(tex_string))
 
         # End result
         self.HTML_arr = None
+        self.__convert()
 
     # Helper methods for resetting counters
 
@@ -102,24 +114,38 @@ class Tex2HTMLConverter:
         return self.tex_tree
 
     def __convert(self) -> None:
-        '''Traverse the tree and emit HTML.'''
         if self.HTML_arr is not None:
             return
         result = []
-        for node in self.tex_tree.contents:
-            if type(node) == TexSoup.data.TexNode:
-                if node.name in IGNORED_NODES:
-                    continue
-                elif node.name == 'tableofcontents':
-                    # To be replaced with the actual TOC
-                    # after parsing is done
-                    result.append('>>> TOC <<<')
-                else:
-                    result.append(node.name)
+        for block in self.blocks:
+            if block.startswith('\\ex'):
+                # A glossed example; we use a custom parser for this
+                result.append(convert_example(block, self.example_counter))
+                self.example_counter += 1
+            elif block.startswith('\\tableofcontents'):
+                # To be replaced with the actual TOC
+                # after parsing is done
+                result.append('<p>TOC</p>')
+            # More special cases will certainly turn up
             else:
-                # The node is a string representing text.
-                result.append('text')
+                result.append(postprocess(self.__convert_block(block)))
         self.HTML_arr = result
+
+    def __convert_block(self, block):
+        result = []
+        # The block represents some LaTeX environment or a paragraph.
+        tree = TexSoup.TexSoup(block)
+        # Is this a text paragraph or one of special node types?
+        first_node = tree.contents[0]
+        if type(first_node) != TexSoup.data.TexNode or first_node.name in TEXT_NODES:
+            result.append('<p>')
+            tmp = []
+            process_text_tree(tree, tmp)
+            result.extend(tmp)
+            result.append('</p>')
+        else:
+            result.append(first_node.name)
+        return ' '.join(result)
 
     # Coverters for individual tags
     def section(self, contents, starred=False):
@@ -163,10 +189,83 @@ class Tex2HTMLConverter:
         return ''.join(self.HTML_arr)
 
 
+def preprocess(txt):
+    preprocessing_dict = {
+        '\\textless{}': '&lt;',
+        '\\textless': '&lt;',
+        '\\textgreater{}': '&gt;',
+        '\\textgreater': '&gt;',
+        '\\ldots{}': '…',
+        '\\_': '_',
+        '\\#': '#',
+        '---': '—',
+        ' -- ': ' — ',
+        '--': '–',
+        '~': '&nbsp;'
+    }
+    for k, v in preprocessing_dict.items():
+        txt = txt.replace(k, v)
+    return txt
+
+
+def postprocess(txt):
+    postprocessing_dict = {
+        '> .': '>.',
+        '> »': '>»',
+        '> ,': '>,',
+        '> ;': '>;',
+        '> ?': '>?',
+        '> !': '>!',
+        '> )': '>)',
+        '( <': '(<',
+        '* <': '*<',
+        '`': '‘',
+        "'": '’',
+        '[</span> ': '[</span>',
+        ' <span class="BraceGroup">]': '<span class="BraceGroup">]'
+    }
+    for k, v in postprocessing_dict.items():
+        txt = txt.replace(k, v)
+    return txt
+
+
+def process_text_tree(tree, result):
+    """
+    process_text_tree iterates over the tree's contents, adds text nodes, and
+    recursively expands and adds contents of simple markup nodes. It does not
+    expect to see nodes that cannot be dealt with by specifying some CSS on 
+    a span and will raise en error if it sees them.
+    """
+    for node in tree.contents:
+        if type(node) != TexSoup.data.TexNode:
+            result.append(node.text.strip())
+        else:
+            tmp = []
+            process_text_tree(node, tmp)
+            if node.name == 'footnote':
+                result.append(
+                    f'<div class="{node.name}">' + ' '.join(tmp) + '</div>')
+            elif node.name == 'textsuperscript':
+                result.append(
+                    f'<sup>' + ' '.join(tmp) + '</sup>')
+            elif node.name == 'textsubscript':
+                result.append(
+                    f'<sub>' + ' '.join(tmp) + '</sub>')
+            else:
+                result.append(
+                    f'<span class="{node.name}">' + ' '.join(tmp) + '</span>')
+
+
+def convert_example(txt, example_number):
+    return f'({example_number}): {txt}'
+
+
 if __name__ == '__main__':
     import os
     path = os.path.join(
         'content', 'coordination_pekelis_20130125_final_cleaned.tex')
     with open(path, 'r', encoding='utf-8') as inp:
         coverter_instance = Tex2HTMLConverter(inp.read().strip())
-    print(sorted(set(coverter_instance._get_HTML_arr())))
+    for el in coverter_instance._get_HTML_arr():
+        print(el)
+        print()
