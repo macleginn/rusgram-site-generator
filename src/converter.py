@@ -21,6 +21,16 @@ TEXT_NODES = {
     'sc',
     'tt'
 }
+SECTION_NODES = {
+    'section',
+    'section*',
+    'subsection',
+    'subsection*',
+    'subsubsection',
+    'subsubsection*',
+    'paragraph',
+    'paragraph*'
+}
 
 
 class TOCNode:
@@ -87,6 +97,9 @@ class Tex2HTMLConverter:
         self.example_counter = 1
         self.figure_counter = 1
         self.table_counter = 1
+        self.footnotes = []
+        self.label_replacement_dict = {}
+        self.last_generated_label = None
 
         # We need this step to cleanly take care of paragraphs
         # and other elements, such as \ex. blocks, that TexSoup
@@ -130,29 +143,83 @@ class Tex2HTMLConverter:
             else:
                 result.append(postprocess(self.__convert_block(block)))
         self.HTML_arr = result
+        for footnote in self.footnotes:
+            self.HTML_arr.append(footnote)
+        print(self.label_replacement_dict)
 
     def __convert_block(self, block):
         result = []
         # The block represents some LaTeX environment or a paragraph.
         tree = TexSoup.TexSoup(block)
-        # Is this a text paragraph or one of special node types?
+        # Is this a text node or one of special node types?
         first_node = tree.contents[0]
         if type(first_node) != TexSoup.data.TexNode or first_node.name in TEXT_NODES:
             result.append('<p>')
             tmp = []
-            process_text_tree(tree, tmp)
+            self.__process_text_tree(tree, tmp)
             result.extend(tmp)
             result.append('</p>')
+        elif first_node.name in SECTION_NODES:
+            tmp = []
+            self.__process_text_tree(tree, tmp)
+            result.extend(tmp)
         else:
             result.append(first_node.name)
         return ' '.join(result)
 
+    def __process_text_tree(self, tree, result):
+        """
+        process_text_tree iterates over the tree's contents, adds text nodes, and
+        recursively expands and adds contents of simple markup nodes. It does not
+        expect to see nodes that cannot be dealt with by specifying a pair of opening
+        and closing tags, except for footnotes, which are replaced with a footnote anchor.
+        The text of the footnote itself is stored for later.
+        """
+        for node in tree.contents:
+            if type(node) != TexSoup.data.TexNode:
+                result.append(node.text.strip())
+            else:
+                print(node.name)
+                tmp = []
+                self.__process_text_tree(node, tmp)
+                if node.name == 'label':
+                    self.label_replacement_dict[node.text[0]
+                                                ] = self.last_generated_label
+                elif node.name == 'footnote':
+                    footnote_no = len(self.footnotes) + 1
+                    result.append(
+                        f'<span id="footnoteanchor{footnote_no}"><sup><a href="#footnote{footnote_no}">{footnote_no}</a></sup></span>')
+                    self.footnotes.append(
+                        f'<div id="footnote{footnote_no}" class="footnote"><sup><a href="#footnoteanchor{footnote_no}">{footnote_no}</a></sup> ' + ' '.join(tmp) + '</div>')
+                elif node.name == 'textsuperscript':
+                    result.append(
+                        f'<sup>' + ' '.join(tmp) + '</sup>')
+                elif node.name == 'textsubscript':
+                    result.append(
+                        f'<sub>' + ' '.join(tmp) + '</sub>')
+                elif node.name == 'section':
+                    result.append(self.section(node))
+                elif node.name == 'section*':
+                    result.append(self.section(node, starred=True))
+                else:
+                    result.append(
+                        f'<span class="{node.name}">' + ' '.join(tmp) + '</span>')
+
     # Coverters for individual tags
-    def section(self, contents, starred=False):
-        result = '</p>' if self.inside_paragraph else ''
-        self.inside_paragraph = False
-        result += '\n'
-        return f'\n<span class="small-caps">{contents}<span>'
+
+    def section(self, node, starred=False):
+        section_no = self.section_counter
+        section_id = f'section-{section_no}'
+        self.last_generated_label = section_id
+        self.section_counter += 1
+        self.__start_new_section()
+        if starred:
+            prefix = ''
+        else:
+            prefix = f'{section_no} '
+        tmp = []
+        self.__process_text_tree(node, tmp)
+        return f'<div class="section" id="{section_id}">{prefix}{" ".join(tmp)}</div>'
 
     def subsection(self, contents, starred=False):
         pass
@@ -221,39 +288,14 @@ def postprocess(txt):
         '* <': '*<',
         '`': '‘',
         "'": '’',
+        "&nbsp; ": '&nbsp;',
         '[</span> ': '[</span>',
-        ' <span class="BraceGroup">]': '<span class="BraceGroup">]'
+        ' <span class="BraceGroup">]': '<span class="BraceGroup">]',
+        ' <span id="foot': '<span id="foot'
     }
     for k, v in postprocessing_dict.items():
         txt = txt.replace(k, v)
     return txt
-
-
-def process_text_tree(tree, result):
-    """
-    process_text_tree iterates over the tree's contents, adds text nodes, and
-    recursively expands and adds contents of simple markup nodes. It does not
-    expect to see nodes that cannot be dealt with by specifying some CSS on 
-    a span and will raise en error if it sees them.
-    """
-    for node in tree.contents:
-        if type(node) != TexSoup.data.TexNode:
-            result.append(node.text.strip())
-        else:
-            tmp = []
-            process_text_tree(node, tmp)
-            if node.name == 'footnote':
-                result.append(
-                    f'<div class="{node.name}">' + ' '.join(tmp) + '</div>')
-            elif node.name == 'textsuperscript':
-                result.append(
-                    f'<sup>' + ' '.join(tmp) + '</sup>')
-            elif node.name == 'textsubscript':
-                result.append(
-                    f'<sub>' + ' '.join(tmp) + '</sub>')
-            else:
-                result.append(
-                    f'<span class="{node.name}">' + ' '.join(tmp) + '</span>')
 
 
 def convert_example(txt, example_number):
@@ -266,6 +308,8 @@ if __name__ == '__main__':
         'content', 'coordination_pekelis_20130125_final_cleaned.tex')
     with open(path, 'r', encoding='utf-8') as inp:
         coverter_instance = Tex2HTMLConverter(inp.read().strip())
-    for el in coverter_instance._get_HTML_arr():
-        print(el)
-        print()
+    with open('out.html', 'w', encoding='utf-8') as out:
+        with open('template.html', 'r', encoding='utf-8') as inp:
+            template = inp.read()
+            out.write(template.replace('{{main}}', '\n'.join(
+                coverter_instance._get_HTML_arr())))
