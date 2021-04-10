@@ -268,7 +268,8 @@ def preprocess(txt):
         '---': '—',
         ' -- ': ' — ',
         '--': '–',
-        '~': '&nbsp;'
+        '~': '&nbsp;',
+        ' —': '&nbsp;—'
     }
     for k, v in preprocessing_dict.items():
         txt = txt.replace(k, v)
@@ -304,12 +305,18 @@ def convert_example(txt, example_number):
 
 if __name__ == '__main__':
     import os
-    path = os.path.join(
-        'content', 'coordination_pekelis_20130125_final_cleaned.tex')
+    opj = os.path.join
+    path = opj('content', 'coordination_pekelis_20130125_final_cleaned.tex')
     with open(path, 'r', encoding='utf-8') as inp:
         coverter_instance = Tex2HTMLConverter(inp.read().strip())
-    with open('out.html', 'w', encoding='utf-8') as out:
-        with open('template.html', 'r', encoding='utf-8') as inp:
+    with open(opj('public', 'out.html'), 'w', encoding='utf-8') as out:
+        with open(opj('templates', 'header.html'), 'r', encoding='utf-8') as inp:
+            header = inp.read()
+        with open(opj('templates', 'base.html'), 'r', encoding='utf-8') as inp:
             template = inp.read()
-            out.write(template.replace('{{main}}', '\n'.join(
-                coverter_instance._get_HTML_arr())))
+            out.write(
+                template.replace(
+                    '{{main}}',
+                    '\n'.join(coverter_instance._get_HTML_arr())
+                ).replace('{{header}}', header)
+            )
