@@ -124,6 +124,10 @@ p {
     font-weight: bold;
 }
 
+.textsc {
+    font-variant: small-caps;
+}
+
 div.footnote {
     text-align: justify;
     font-size: 14pt;
