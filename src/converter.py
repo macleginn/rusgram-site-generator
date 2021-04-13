@@ -147,22 +147,35 @@ class Tex2HTMLConverter:
             self.HTML_arr.append(footnote)
         print(self.label_replacement_dict)
 
-    def __convert_block(self, block):
+    def __convert_block(self, block, already_parsed=False) -> str:
         result = []
         # The block represents some LaTeX environment or a paragraph.
-        tree = TexSoup.TexSoup(block)
+        if already_parsed:
+            tree = block
+        else:
+            tree = TexSoup.TexSoup(block)
         # Is this a text node or one of special node types?
         first_node = tree.contents[0]
         if type(first_node) != TexSoup.data.TexNode or first_node.name in TEXT_NODES:
-            result.append('<p>')
+            # Do not add paragraph tags for pre-parsed elements.
+            if not already_parsed:
+                result.append('<p>')
             tmp = []
             self.__process_text_tree(tree, tmp)
             result.extend(tmp)
-            result.append('</p>')
+            if not already_parsed:
+                result.append('</p>')
+        elif first_node.name == 'BraceGroup':
+            # An escape sequence
+            result.append(first_node.contents[0])
         elif first_node.name in SECTION_NODES:
             tmp = []
             self.__process_text_tree(tree, tmp)
             result.extend(tmp)
+        elif first_node.name == 'itemize':
+            result.append(self.itemize(first_node))
+        elif first_node.name == 'enumerate':
+            result.append(self.enumerate(first_node))
         else:
             result.append(first_node.name)
         return ' '.join(result)
@@ -177,9 +190,11 @@ class Tex2HTMLConverter:
         """
         for node in tree.contents:
             if type(node) != TexSoup.data.TexNode:
-                result.append(node.text.strip())
+                try:
+                    result.append(node.text.strip())
+                except AttributeError:
+                    result.append(node.strip())
             else:
-                print(node.name)
                 tmp = []
                 self.__process_text_tree(node, tmp)
                 if node.name == 'label':
@@ -201,6 +216,15 @@ class Tex2HTMLConverter:
                     result.append(self.section(node))
                 elif node.name == 'section*':
                     result.append(self.section(node, starred=True))
+                elif node.name == 'subsection':
+                    result.append(self.subsection(node))
+                elif node.name == 'subsection*':
+                    result.append(self.subsection(node, starred=True))
+                elif node.name == 'subsubsection':
+                    result.append(self.subsubsection(node))
+                elif node.name == 'subsubsection*':
+                    result.append(self.subsubsection(node, starred=True))
+                # TODO: paragraph
                 else:
                     result.append(
                         f'<span class="{node.name}">' + ' '.join(tmp) + '</span>')
@@ -208,36 +232,115 @@ class Tex2HTMLConverter:
     # Coverters for individual tags
 
     def section(self, node, starred=False):
-        section_no = self.section_counter
-        section_id = f'section-{section_no}'
-        self.last_generated_label = section_id
-        self.section_counter += 1
-        self.__start_new_section()
-        if starred:
-            prefix = ''
-        else:
+        if not starred:
+            section_no = self.section_counter
+            section_id = f'section-{section_no}'
+            self.last_generated_label = section_id
+            self.section_counter += 1
+            self.__start_new_section()
+            section_id_attribute = f' id="{section_id}"'
             prefix = f'{section_no} '
+        else:
+            # Starred sections get no ids and cannot be referenced.
+            section_id_attribute = ''
+            prefix = ''
         tmp = []
         self.__process_text_tree(node, tmp)
-        return f'<div class="section" id="{section_id}">{prefix}{" ".join(tmp)}</div>'
+        return f'<div class="section"{section_id_attribute}>{prefix}{" ".join(tmp)}</div>'
 
-    def subsection(self, contents, starred=False):
-        pass
+    def subsection(self, node, starred=False):
+        if not starred:
+            subsection_no = self.subsection_counter
+            subsection_id = f'subsection-{self.section_counter-1}.{subsection_no}'
+            self.last_generated_label = subsection_id
+            self.subsection_counter += 1
+            self.__start_new_subsection()
+            subsection_id_attribute = f' id="{subsection_id}"'
+            prefix = f'{self.section_counter-1}.{subsection_no} '
+        else:
+            # Starred sections get no ids and cannot be referenced.
+            subsection_id_attribute = ''
+            prefix = ''
+        tmp = []
+        self.__process_text_tree(node, tmp)
+        return f'<div class="subsection"{subsection_id_attribute}>{prefix}{" ".join(tmp)}</div>'
 
-    def subsubsection(self, contents, starred=False):
-        pass
+    def subsubsection(self, node, starred=False):
+        if not starred:
+            subsubsection_no = self.subsubsection_counter
+            subsubsection_id = f'subsubsection-{self.section_counter-1}.{self.subsection_counter-1}.{subsubsection_no}'
+            self.last_generated_label = subsubsection_no
+            self.subsubsection_counter += 1
+            self.__start_new_subsubsection()
+            subsubsection_id_attribute = f' id="{subsubsection_id}"'
+            prefix = f'{self.section_counter-1}.{self.subsection_counter-1}.{subsubsection_no} '
+        else:
+            # Starred sections get no ids and cannot be referenced.
+            subsubsection_id_attribute = ''
+            prefix = ''
+        tmp = []
+        self.__process_text_tree(node, tmp)
+        return f'<div class="subsubsection"{subsubsection_id_attribute}>{prefix}{" ".join(tmp)}</div>'
 
     def paragraph(self, contents, starred=False):
         pass
 
-    def textsc(self, contents):
-        return f' <span class="small-caps">{contents}<span>'
+    def itemize(self, node):
+        result = []
+        for child in node.children:
+            # Each child is an item
+            tmp = []
+            for item_element in child.contents:
+                # This can be either a text node or an embedded environment.
+                # self.__convert_block can take care of either.
+                item_tree = empty_tree()
+                item_tree.append(item_element)
+                tmp.append(self.__convert_block(item_tree, True))
+            result.append(f'<li>{" ".join(tmp)}</li>')
+        return f'<ul>{" ".join(result)}</ul>'
 
-    def textit(self, contents):
-        return f' <span class="italics">{contents}<span>'
-
-    def textbf(self, contents):
-        return f' <span class="boldface">{contents}<span>'
+    def enumerate(self, node):
+        result = []
+        # Check if the node is an example group and set the counter.
+        # For an example group the following code is produced by pandoc:
+        # ```latex
+        # \begin{enumerate}
+        # \def\labelenumi{(\arabic{enumi})}
+        # \setcounter{enumi}{1}                   % Here's where the counter is set.
+        # \item
+        #         Мой друг ― доктор из Италии по Интернету посоветовал \textit{мазь} и
+        #         \textit{попить антибиотик}. {[}коллективный. Хватит губить детей!
+        #         (2011){]}
+        # \item
+        #         Хочется, потому что туда обещали \textit{дрова} \textit{и табаку}.
+        #         {[}Д.~Быков. Орфография (2002){]}
+        # \end{enumerate}
+        # ```
+        first_example_no = None
+        class_attribute = ''
+        if node.children[0].name == 'def':
+            class_attribute = f' class="example"'
+            first_example_no = 1
+        if len(node.children) >= 3 and node.children[2].name == 'setcounter':
+            first_example_no = int(node.children[2].args[1].contents[0]) + 1
+        for child in node.children:
+            if child.name != 'item':
+                continue
+            tmp = []
+            for item_element in child.contents:
+                # This can be either a text node or an embedded environment.
+                # self.__convert_block can take care of either.
+                item_tree = empty_tree()
+                item_tree.append(item_element)
+                tmp.append(self.__convert_block(item_tree, True))
+            if first_example_no is None:
+                # This is a regular list
+                result.append(f'<li>{" ".join(tmp)}</li>')
+            else:
+                # This is an example list; we need to supply numbers ourselves
+                result.append(f'<li>({first_example_no}) {" ".join(tmp)}</li>')
+                first_example_no += 1
+        return f'<ol{class_attribute}>{" ".join(result)}</ol>'
 
     def longtable(self, node):
         # Parse node.args to get the number of columns.
@@ -256,6 +359,10 @@ class Tex2HTMLConverter:
         return ''.join(self.HTML_arr)
 
 
+def empty_tree():
+    return TexSoup.TexSoup('')
+
+
 def preprocess(txt):
     preprocessing_dict = {
         '\\textless{}': '&lt;',
@@ -263,6 +370,7 @@ def preprocess(txt):
         '\\textgreater{}': '&gt;',
         '\\textgreater': '&gt;',
         '\\ldots{}': '…',
+        '\\ldots': '…',
         '\\_': '_',
         '\\#': '#',
         '---': '—',
@@ -292,7 +400,9 @@ def postprocess(txt):
         "&nbsp; ": '&nbsp;',
         '[</span> ': '[</span>',
         ' <span class="BraceGroup">]': '<span class="BraceGroup">]',
-        ' <span id="foot': '<span id="foot'
+        ' <span id="foot': '<span id="foot',
+        '[ ': '[',
+        ' ]': ']'
     }
     for k, v in postprocessing_dict.items():
         txt = txt.replace(k, v)

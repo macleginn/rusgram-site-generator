@@ -13,7 +13,8 @@ body {
     padding: 0;
     width: 960px;
     margin: auto;
-    font-family: 'EB Garamond', serif;
+    /* font-family: 'EB Garamond', serif; */
+    font-family: 'Georgia', serif;
     font-size: 16pt;
 }
 
@@ -83,8 +84,29 @@ div#main {
 
 /* Text */
 
+.section, .subsection, .subsubsection {
+    text-indent: 1em;
+}
+
+.section {
+    font-size: 20pt;
+    font-weight: bold;
+    margin-top: 1em;
+    margin-bottom: 0.5em;
+}
+
+.subsection {
+    font-size: 18pt;
+}
+
+.subsection, .subsubsection {
+    font-weight: bold;
+    margin-top: 1em;
+    margin-bottom: 0.5em;
+}
+
 p {
-    line-height: 24pt;
+    line-height: 28pt;
     text-align: justify;
     text-indent: 1em;
     margin: 0;
@@ -105,6 +127,20 @@ p {
 div.footnote {
     text-align: justify;
     font-size: 14pt;
+}
+
+li {
+    text-align: justify;
+}
+
+/* Examples */
+
+ol.example {
+    list-style: none;
+}
+
+ol.example li {
+    margin-bottom: 0.5em;
 }
 
 /* Tables */
