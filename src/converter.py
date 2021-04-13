@@ -12,6 +12,8 @@ IGNORED_NODES = {
 }
 TEXT_NODES = {
     'underline',
+    'textsubscript',
+    'textsuperscript',
     'textit',
     'textbf',
     'textsc',
@@ -144,7 +146,7 @@ class Tex2HTMLConverter:
                 result.append(postprocess(self.__convert_block(block)))
         self.HTML_arr = result
         for footnote in self.footnotes:
-            self.HTML_arr.append(footnote)
+            self.HTML_arr.append(postprocess(footnote))
         print(self.label_replacement_dict)
 
     def __convert_block(self, block, already_parsed=False) -> str:
@@ -212,6 +214,8 @@ class Tex2HTMLConverter:
                 elif node.name == 'textsubscript':
                     result.append(
                         f'<sub>' + ' '.join(tmp) + '</sub>')
+                elif node.name == 'textbackslash':
+                    result.append('\\')
                 elif node.name == 'section':
                     result.append(self.section(node))
                 elif node.name == 'section*':
@@ -365,9 +369,14 @@ def empty_tree():
 
 def preprocess(txt):
     preprocessing_dict = {
+        # Preserve intentional spaces
+        '\\textless{} ': '&lt;_',
         '\\textless{}': '&lt;',
+        '\\textless ': '&lt;_',
         '\\textless': '&lt;',
+        ' \\textgreater{}': '_&gt;',
         '\\textgreater{}': '&gt;',
+        ' \\textgreater': '_&gt;',
         '\\textgreater': '&gt;',
         '\\ldots{}': '…',
         '\\ldots': '…',
@@ -387,14 +396,23 @@ def preprocess(txt):
 def postprocess(txt):
     postprocessing_dict = {
         '> .': '>.',
+        '&gt; .': '&gt;.',
         '> »': '>»',
+        '&gt; »': '&gt;»',
         '> ,': '>,',
+        '&gt; ,': '&gt;,',
         '> ;': '>;',
+        '&gt; ;': '&gt;;',
         '> ?': '>?',
+        '&gt; ?': '&gt;?',
         '> !': '>!',
+        '&gt; !': '&gt;!',
         '> )': '>)',
+        '&gt; )': '&gt;)',
         '( <': '(<',
+        '( &lt;': '(&lt;',
         '* <': '*<',
+        '* &lt;': '*&lt;',
         '`': '‘',
         "'": '’',
         "&nbsp; ": '&nbsp;',
@@ -402,7 +420,15 @@ def postprocess(txt):
         ' <span class="BraceGroup">]': '<span class="BraceGroup">]',
         ' <span id="foot': '<span id="foot',
         '[ ': '[',
-        ' ]': ']'
+        ' ]': ']',
+        '( ': '(',
+        ' )': ')',
+        '&lt; ': '&lt;',
+        ' &gt;': '&gt;',
+        '<sup>?</sup> ': '<sup>?</sup>',
+        # Restore intentional spaces
+        '&lt;_': '&lt; ',
+        '_&gt;': ' &gt;'
     }
     for k, v in postprocessing_dict.items():
         txt = txt.replace(k, v)
